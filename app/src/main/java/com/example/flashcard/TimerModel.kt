@@ -1,13 +1,11 @@
 package com.example.flashcard
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
@@ -17,79 +15,95 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.filled.Refresh
 
-// An enum to represent the different states of the timer.
-sealed class TimerState {
-    object SetTime : TimerState()
-    object Countdown : TimerState()
+// Enum to manage the state of the timer
+enum class TimerState {
+    SETTING,
+    RUNNING,
+    PAUSED,
+    FINISHED
 }
 
+// ViewModel to handle timer logic
 class TimerModel : ViewModel() {
+    // A mutable state variable to hold the current timer state
+    var timerState by mutableStateOf(TimerState.SETTING)
 
-    // State to hold the current screen state for the timer.
-    var currentTimerState by mutableStateOf<TimerState>(TimerState.SetTime)
-        private set
+    // State for user input in minutes
+    var minutesInput by mutableStateOf("")
 
-    // State for the countdown time in milliseconds.
+    // State for user input in seconds
+    var secondsInput by mutableStateOf("")
+
+    // State for the remaining time in milliseconds
     var remainingTimeMillis by mutableStateOf(0L)
-        private set
 
-    // A job to manage the coroutine for the countdown.
+    // Job for the countdown coroutine
     private var countdownJob: Job? = null
 
-    // Sets the initial time for the timer.
-    fun setTime(minutes: Int, seconds: Int) {
-        remainingTimeMillis = (minutes * 60 + seconds) * 1000L
-    }
-
-    // Starts the countdown timer.
+    // Function to start the timer
     fun startTimer() {
-        if (countdownJob?.isActive == true) return
+        val totalMillis = try {
+            (minutesInput.toLong() * 60 * 1000) + (secondsInput.toLong() * 1000)
+        } catch (e: NumberFormatException) {
+            0L // Handle invalid input gracefully
+        }
 
-        currentTimerState = TimerState.Countdown
-
-        countdownJob = viewModelScope.launch {
-            while (remainingTimeMillis > 0) {
-                delay(1000L)
-                remainingTimeMillis -= 1000L
-            }
-            // Timer has finished, go back to the SetTime screen.
-            currentTimerState = TimerState.SetTime
+        if (totalMillis > 0) {
+            remainingTimeMillis = totalMillis
+            timerState = TimerState.RUNNING
+            startCountdown()
         }
     }
 
-    // Resets the timer and cancels the countdown job.
+    // Function to pause the timer
+    fun pauseTimer() {
+        countdownJob?.cancel()
+        timerState = TimerState.PAUSED
+    }
+
+    // Function to resume the timer
+    fun resumeTimer() {
+        timerState = TimerState.RUNNING
+        startCountdown()
+    }
+
+    // Function to reset the timer
     fun resetTimer() {
         countdownJob?.cancel()
-        currentTimerState = TimerState.SetTime
+        timerState = TimerState.SETTING
+        minutesInput = ""
+        secondsInput = ""
         remainingTimeMillis = 0L
     }
 
-    // Helper function to format the remaining time into a readable string (MM:SS).
-    fun getFormattedTime(): String {
-        val totalSeconds = remainingTimeMillis / 1000
-        val minutes = totalSeconds / 60
-        val seconds = totalSeconds % 60
-        return String.format("%02d:%02d", minutes, seconds)
-    }
-
-    // Ensure the countdown job is cancelled when the ViewModel is destroyed.
-    override fun onCleared() {
-        super.onCleared()
-        countdownJob?.cancel()
+    // Coroutine to handle the countdown
+    private fun startCountdown() {
+        countdownJob = viewModelScope.launch {
+            while (remainingTimeMillis > 0 && timerState == TimerState.RUNNING) {
+                delay(1000)
+                remainingTimeMillis -= 1000
+            }
+            if (remainingTimeMillis <= 0) {
+                timerState = TimerState.FINISHED
+                // Logic for when the timer finishes
+            }
+        }
     }
 }
 
-// The main composable for the Timer feature that controls the state.
-// It is now a standalone function that takes the ViewModel as a parameter.
+// Composable function for the timer's UI.
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TimerScreen(viewModel: TimerModel, onBack: () -> Unit) {
@@ -110,20 +124,18 @@ fun TimerScreen(viewModel: TimerModel, onBack: () -> Unit) {
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            when (viewModel.currentTimerState) {
-                is TimerState.SetTime -> SetTimerScreen(viewModel)
-                is TimerState.Countdown -> CountdownScreen(viewModel)
+            when (viewModel.timerState) {
+                TimerState.SETTING -> SetTimerScreen(viewModel)
+                TimerState.RUNNING, TimerState.PAUSED -> CountdownScreen(viewModel)
+                TimerState.FINISHED -> FinishedScreen(viewModel)
             }
         }
     }
 }
 
-// Composable for the screen where the user sets the timer.
+// Composable function for setting the timer.
 @Composable
 fun SetTimerScreen(viewModel: TimerModel) {
-    var minutes by remember { mutableStateOf("25") }
-    var seconds by remember { mutableStateOf("00") }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -131,48 +143,42 @@ fun SetTimerScreen(viewModel: TimerModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text("Set Study Time", fontSize = 24.sp, fontWeight = FontWeight.Bold)
-        Spacer(modifier = Modifier.height(24.dp))
+        Text("Set Timer", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Center,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             OutlinedTextField(
-                value = minutes,
-                onValueChange = { minutes = it },
+                value = viewModel.minutesInput,
+                onValueChange = { viewModel.minutesInput = it },
                 label = { Text("Minutes") },
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                modifier = Modifier.weight(1f)
             )
-            Spacer(modifier = Modifier.width(16.dp))
             OutlinedTextField(
-                value = seconds,
-                onValueChange = { seconds = it },
+                value = viewModel.secondsInput,
+                onValueChange = { viewModel.secondsInput = it },
                 label = { Text("Seconds") },
-                modifier = Modifier.weight(1f),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                modifier = Modifier.weight(1f)
             )
         }
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         Button(
-            onClick = {
-                val min = minutes.toIntOrNull() ?: 0
-                val sec = seconds.toIntOrNull() ?: 0
-                viewModel.setTime(min, sec)
-                viewModel.startTimer()
-            },
-            enabled = (minutes.toIntOrNull() ?: 0) + (seconds.toIntOrNull() ?: 0) > 0,
+            onClick = { viewModel.startTimer() },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Start Timer")
+            Text("Start")
         }
     }
 }
 
-// Composable for the countdown screen.
+// Composable function for the countdown view.
 @Composable
 fun CountdownScreen(viewModel: TimerModel) {
+    val minutes = viewModel.remainingTimeMillis / 1000 / 60
+    val seconds = viewModel.remainingTimeMillis / 1000 % 60
+    val formattedTime = String.format("%02d:%02d", minutes, seconds)
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -180,18 +186,61 @@ fun CountdownScreen(viewModel: TimerModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        Text(
-            text = viewModel.getFormattedTime(),
-            fontSize = 72.sp,
-            fontWeight = FontWeight.ExtraBold,
-            modifier = Modifier.padding(16.dp)
-        )
-        Spacer(modifier = Modifier.height(24.dp))
-        Button(
-            onClick = { viewModel.resetTimer() },
-            modifier = Modifier.fillMaxWidth()
+        Text(formattedTime, fontSize = 48.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(32.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Reset Timer")
+            val icon: ImageVector
+            val description: String
+            if (viewModel.timerState == TimerState.PAUSED) {
+                icon = Icons.Default.PlayArrow
+                description = "Resume"
+            } else {
+                icon = Icons.Default.Pause
+                description = "Pause"
+            }
+
+            IconButton(onClick = {
+                if (viewModel.timerState == TimerState.PAUSED) {
+                    viewModel.resumeTimer()
+                } else {
+                    viewModel.pauseTimer()
+                }
+            }) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = description,
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+
+            IconButton(onClick = { viewModel.resetTimer() }) {
+                Icon(
+                    imageVector = Icons.Default.Refresh,
+                    contentDescription = "Reset",
+                    modifier = Modifier.size(48.dp)
+                )
+            }
+        }
+    }
+}
+
+// Composable function for when the timer has finished.
+@Composable
+fun FinishedScreen(viewModel: TimerModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Timer Finished!", fontSize = 32.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(onClick = { viewModel.resetTimer() }) {
+            Text("Set New Timer")
         }
     }
 }
