@@ -1,4 +1,3 @@
-
 package com.example.flashcard
 
 import android.os.Bundle
@@ -7,41 +6,99 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flashcard.ui.theme.FlashcardTheme
+import kotlin.random.Random
 
 class MainActivity : ComponentActivity() {
-    // The viewModels() delegate provides an instance of the ViewModel.
-    // This instance will survive configuration changes (like screen rotation).
-    private val viewModel: FlashcardViewModel by viewModels()
+    private val flashcardViewModel: FlashcardViewModel by viewModels()
+    private val timerViewModel: TimerModel by viewModels()
+
+    // 1. New enum to represent different screens.
+    sealed class StudyBuddyScreen {
+        object Home : StudyBuddyScreen()
+        object Flashcard : StudyBuddyScreen()
+        object Timer : StudyBuddyScreen()
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             FlashcardTheme {
-                FlashcardScreen(viewModel)
+                // 2. State to track the current screen.
+                var currentScreen by remember { mutableStateOf<StudyBuddyScreen>(StudyBuddyScreen.Home) }
+
+                // 3. Conditional composable based on the current screen.
+                when (currentScreen) {
+                    is StudyBuddyScreen.Home -> HomeScreen(onScreenSelected = { currentScreen = it })
+                    is StudyBuddyScreen.Flashcard -> FlashcardScreen(flashcardViewModel, onBack = { currentScreen = StudyBuddyScreen.Home })
+                    is StudyBuddyScreen.Timer -> TimerScreen(timerViewModel, onBack = { currentScreen = StudyBuddyScreen.Home })
+                }
             }
         }
     }
 }
 
-// 4. Composable function to display the flashcard UI.
-// This function now takes the ViewModel as a parameter.
+// Composable for the home screen with navigation options.
 @Composable
-fun FlashcardScreen(viewModel: FlashcardViewModel) {
+fun HomeScreen(onScreenSelected: (MainActivity.StudyBuddyScreen) -> Unit) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Welcome to Study Buddy", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = { onScreenSelected(MainActivity.StudyBuddyScreen.Flashcard) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Flashcard")
+        }
+        Spacer(modifier = Modifier.height(16.dp))
+        Button(
+            onClick = { onScreenSelected(MainActivity.StudyBuddyScreen.Timer) },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Timer")
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun FlashcardScreen(viewModel: FlashcardViewModel, onBack: () -> Unit) {
 
     // State to manage the visibility of the "add new card" form.
     var isAddingCard by remember { mutableStateOf(false) }
 
-    Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Flashcards") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -174,10 +231,119 @@ fun AddCardForm(onAddCard: (String, String) -> Unit, onCancel: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimerScreen(viewModel: TimerModel, onBack: () -> Unit) {
+    Scaffold(
+        modifier = Modifier.fillMaxSize(),
+        topBar = {
+            TopAppBar(
+                title = { Text("Timer") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            // This composable acts as a controller, switching between screens based on the ViewModel's state.
+            when (viewModel.currentTimerState) {
+                is TimerState.SetTime -> SetTimerScreen(viewModel)
+                is TimerState.Countdown -> CountdownScreen(viewModel)
+            }
+        }
+    }
+}
+
+@Composable
+fun SetTimerScreen(viewModel: TimerModel) {
+    var minutes by remember { mutableStateOf("25") }
+    var seconds by remember { mutableStateOf("00") }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text("Set Study Time", fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(24.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = minutes,
+                onValueChange = { minutes = it },
+                label = { Text("Minutes") },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+            Spacer(modifier = Modifier.width(16.dp))
+            OutlinedTextField(
+                value = seconds,
+                onValueChange = { seconds = it },
+                label = { Text("Seconds") },
+                modifier = Modifier.weight(1f),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+            )
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = {
+                val min = minutes.toIntOrNull() ?: 0
+                val sec = seconds.toIntOrNull() ?: 0
+                viewModel.setTime(min, sec)
+                viewModel.startTimer()
+            },
+            enabled = (minutes.toIntOrNull() ?: 0) + (seconds.toIntOrNull() ?: 0) > 0,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Start Timer")
+        }
+    }
+}
+
+@Composable
+fun CountdownScreen(viewModel: TimerModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = viewModel.getFormattedTime(),
+            fontSize = 72.sp,
+            fontWeight = FontWeight.ExtraBold,
+            modifier = Modifier.padding(16.dp)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(
+            onClick = { viewModel.resetTimer() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("Reset Timer")
+        }
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 fun FlashcardScreenPreview() {
     FlashcardTheme {
-        FlashcardScreen(viewModel = FlashcardViewModel())
+        FlashcardScreen(viewModel = FlashcardViewModel(), onBack = {})
     }
 }
